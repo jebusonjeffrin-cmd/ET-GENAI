@@ -42,8 +42,9 @@ class LLMClient(Protocol):
 ```bash
 # Backend
 cd backend
-pytest                     # unit + integration — no Ollama needed
-pytest -m phase_gate       # functional acceptance — requires OLLAMA_HOST pointed at a real Ollama instance
+pytest                                    # unit + integration — no Ollama needed
+LLM_BACKEND=ollama python scripts/phase_gate/phase_1.py   # functional acceptance — requires a real Ollama instance
+LLM_BACKEND=ollama python scripts/phase_gate/phase_2.py   # (phase_3.py likewise)
 
 # Frontend
 cd frontend
