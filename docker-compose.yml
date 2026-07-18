@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_USER: inspiron
+      POSTGRES_PASSWORD: inspiron
+      POSTGRES_DB: inspiron
+    ports: ["5432:5432"]
+    volumes: ["pg_data:/var/lib/postgresql/data"]
+
+  neo4j:
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/inspiron_dev
+    ports: ["7474:7474", "7687:7687"]
+    volumes: ["neo4j_data:/data"]
+
+  redis:
+    image: redis:7
+    ports: ["6379:6379"]
+
+  # NOTE: no ollama service here on purpose — Ollama runs on the other laptop,
+  # not in this stack. Point OLLAMA_HOST at it via backend/.env. See
+  # docs/PROJECT_PLAN.md §8 and docs/TESTING.md.
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      # Overrides layered on top of backend/.env for the containerized graph
+      # (service names instead of localhost). Vector store is still the
+      # in-memory FakeVectorStore even here — a real PgVectorStore is a
+      # tracked Phase 1 hardening item, not yet built.
+      DATABASE_URL: postgresql+asyncpg://inspiron:inspiron@postgres:5432/inspiron
+      GRAPH_STORE_BACKEND: neo4j
+      NEO4J_URI: bolt://neo4j:7687
+      REDIS_URL: redis://redis:6379/0
+    ports: ["8000:8000"]
+    depends_on: [postgres, neo4j, redis]
+
+volumes:
+  pg_data:
+  neo4j_data:
