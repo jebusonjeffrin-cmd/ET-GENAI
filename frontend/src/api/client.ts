@@ -28,6 +28,18 @@ export interface GraphStats {
   edge_count: number;
 }
 
+export interface CopilotCitation {
+  index: number;
+  document_id: string;
+  chunk_id: string;
+  text: string;
+}
+
+export interface CopilotAnswer {
+  answer: string;
+  citations: CopilotCitation[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
@@ -52,4 +64,12 @@ export async function getEquipment360(tag: string): Promise<Equipment360> {
 
 export async function getGraphStats(): Promise<GraphStats> {
   return request<GraphStats>("/graph/stats");
+}
+
+export async function askCopilot(question: string): Promise<CopilotAnswer> {
+  return request<CopilotAnswer>("/copilot/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+  });
 }

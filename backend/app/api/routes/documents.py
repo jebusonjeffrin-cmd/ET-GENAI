@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict
 from app.dependencies import (
     get_document_repo,
     get_graph_store,
+    get_keyword_store,
     get_llm_client,
     get_object_store,
     get_vector_store,
@@ -34,6 +35,7 @@ async def upload_document(
     llm=Depends(get_llm_client),
     graph_store=Depends(get_graph_store),
     vector_store=Depends(get_vector_store),
+    keyword_store=Depends(get_keyword_store),
     object_store=Depends(get_object_store),
     document_repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentOut:
@@ -42,7 +44,7 @@ async def upload_document(
     filename = file.filename or f"unnamed-{document_id[:8]}"
     await document_repo.create(DocumentRecord(id=document_id, filename=filename, status="queued"))
 
-    pipeline = IngestionPipeline(llm, graph_store, vector_store, object_store, document_repo)
+    pipeline = IngestionPipeline(llm, graph_store, vector_store, keyword_store, object_store, document_repo)
     entities = await pipeline.run(document_id, filename, data)
 
     record = await document_repo.get(document_id)

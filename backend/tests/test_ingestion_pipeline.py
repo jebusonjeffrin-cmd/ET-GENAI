@@ -4,7 +4,9 @@ from app.models.entities import EquipmentMention, ExtractedEntities, PersonMenti
 from app.stores.document_repo import DocumentRepository
 
 
-async def test_pipeline_writes_graph_and_vectors(fake_llm, fake_graph_store, fake_vector_store, fake_object_store, test_session):
+async def test_pipeline_writes_graph_and_vectors(
+    fake_llm, fake_graph_store, fake_vector_store, fake_keyword_store, fake_object_store, test_session
+):
     document_repo = DocumentRepository(test_session)
     await document_repo.create(DocumentRecord(id="doc-1", filename="work_order.txt", status="queued"))
 
@@ -17,7 +19,9 @@ async def test_pipeline_writes_graph_and_vectors(fake_llm, fake_graph_store, fak
         ),
     )
 
-    pipeline = IngestionPipeline(fake_llm, fake_graph_store, fake_vector_store, fake_object_store, document_repo)
+    pipeline = IngestionPipeline(
+        fake_llm, fake_graph_store, fake_vector_store, fake_keyword_store, fake_object_store, document_repo
+    )
     entities = await pipeline.run("doc-1", "work_order.txt", b"Work order for Pump P-101, performed by R. Iyer.")
 
     assert entities.equipment[0].tag == "P-101"
@@ -30,14 +34,19 @@ async def test_pipeline_writes_graph_and_vectors(fake_llm, fake_graph_store, fak
     assert record.status == "done"
 
     assert len(fake_vector_store._records) > 0
+    assert len(fake_keyword_store._records) > 0
     assert fake_object_store.get("doc-1") == b"Work order for Pump P-101, performed by R. Iyer."
 
 
-async def test_pipeline_marks_status_transitions(fake_llm, fake_graph_store, fake_vector_store, fake_object_store, test_session):
+async def test_pipeline_marks_status_transitions(
+    fake_llm, fake_graph_store, fake_vector_store, fake_keyword_store, fake_object_store, test_session
+):
     document_repo = DocumentRepository(test_session)
     await document_repo.create(DocumentRecord(id="doc-2", filename="sop.txt", status="queued"))
 
-    pipeline = IngestionPipeline(fake_llm, fake_graph_store, fake_vector_store, fake_object_store, document_repo)
+    pipeline = IngestionPipeline(
+        fake_llm, fake_graph_store, fake_vector_store, fake_keyword_store, fake_object_store, document_repo
+    )
     await pipeline.run("doc-2", "sop.txt", b"Standard operating procedure text.")
 
     record = await document_repo.get("doc-2")

@@ -5,6 +5,7 @@ from app.llm.base import LLMClient
 from app.models.entities import ExtractedEntities, IngestionStatus
 from app.stores.document_repo import DocumentRepository
 from app.stores.graph_store import GraphEdge, GraphNode, GraphStore
+from app.stores.keyword_store import KeywordStore
 from app.stores.object_store import ObjectStore
 from app.stores.vector_store import VectorRecord, VectorStore
 
@@ -29,12 +30,14 @@ class IngestionPipeline:
         llm: LLMClient,
         graph_store: GraphStore,
         vector_store: VectorStore,
+        keyword_store: KeywordStore,
         object_store: ObjectStore,
         document_repo: DocumentRepository,
     ) -> None:
         self.llm = llm
         self.graph_store = graph_store
         self.vector_store = vector_store
+        self.keyword_store = keyword_store
         self.object_store = object_store
         self.document_repo = document_repo
 
@@ -54,7 +57,7 @@ class IngestionPipeline:
         self._write_graph(document_id, filename, entities)
 
         await self.document_repo.update_status(document_id, IngestionStatus.EMBEDDING.value)
-        self._write_embeddings(document_id, text)
+        self._index_chunks(document_id, text)
 
         await self.document_repo.update_status(document_id, IngestionStatus.DONE.value)
         return entities
@@ -79,15 +82,15 @@ class IngestionPipeline:
             self.graph_store.upsert_node(GraphNode(id=person_node_id, label="Person", properties=person_props))
             self.graph_store.upsert_edge(GraphEdge(source_id=doc_node_id, target_id=person_node_id, relationship="MENTIONS"))
 
-    def _write_embeddings(self, document_id: str, text: str) -> None:
+    def _index_chunks(self, document_id: str, text: str) -> None:
         chunks = _chunk(text)
         if not chunks:
             return
         vectors = self.llm.embed(chunks)
         for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
-            self.vector_store.upsert(
-                VectorRecord(id=f"{document_id}:{i}", document_id=document_id, text=chunk, vector=vector)
-            )
+            record = VectorRecord(id=f"{document_id}:{i}", document_id=document_id, text=chunk, vector=vector)
+            self.vector_store.upsert(record)
+            self.keyword_store.index(record)
 
 
 def _chunk(text: str, size: int = 1000, overlap: int = 100) -> list[str]:

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.dependencies import (
     get_document_repo,
     get_graph_store,
+    get_keyword_store,
     get_llm_client,
     get_object_store,
     get_vector_store,
@@ -17,6 +18,7 @@ from app.main import create_app
 from app.models.db_models import Base
 from app.stores.document_repo import DocumentRepository
 from app.stores.graph_store import FakeGraphStore
+from app.stores.keyword_store import FakeKeywordStore
 from app.stores.object_store import FakeObjectStore
 from app.stores.vector_store import FakeVectorStore
 
@@ -37,6 +39,11 @@ def fake_vector_store() -> FakeVectorStore:
 
 
 @pytest.fixture
+def fake_keyword_store() -> FakeKeywordStore:
+    return FakeKeywordStore()
+
+
+@pytest.fixture
 def fake_object_store() -> FakeObjectStore:
     return FakeObjectStore()
 
@@ -53,7 +60,7 @@ async def test_session():
 
 
 @pytest_asyncio.fixture
-async def client(fake_llm, fake_graph_store, fake_vector_store, fake_object_store, test_session):
+async def client(fake_llm, fake_graph_store, fake_vector_store, fake_keyword_store, fake_object_store, test_session):
     """A FastAPI test client with every external dependency swapped for a
     Fake* implementation via dependency_overrides — the app under test never
     touches Ollama, Neo4j, Postgres, or disk. See docs/TESTING.md."""
@@ -61,6 +68,7 @@ async def client(fake_llm, fake_graph_store, fake_vector_store, fake_object_stor
     app.dependency_overrides[get_llm_client] = lambda: fake_llm
     app.dependency_overrides[get_graph_store] = lambda: fake_graph_store
     app.dependency_overrides[get_vector_store] = lambda: fake_vector_store
+    app.dependency_overrides[get_keyword_store] = lambda: fake_keyword_store
     app.dependency_overrides[get_object_store] = lambda: fake_object_store
     app.dependency_overrides[get_document_repo] = lambda: DocumentRepository(test_session)
 

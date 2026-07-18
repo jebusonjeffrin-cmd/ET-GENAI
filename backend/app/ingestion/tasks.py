@@ -8,6 +8,7 @@ from app.ingestion.pipeline import IngestionPipeline
 from app.llm.fake import FakeLLMClient
 from app.stores.document_repo import DocumentRepository, SessionLocal
 from app.stores.graph_store import FakeGraphStore
+from app.stores.keyword_store import FakeKeywordStore
 from app.stores.object_store import LocalDiskObjectStore
 from app.stores.vector_store import FakeVectorStore
 
@@ -21,10 +22,10 @@ def process_document_task(document_id: str, filename: str, data: bytes) -> None:
     diagram, and can be switched on once a broker is running.
 
     KNOWN LIMITATION (documented, not hidden): this task currently uses
-    process-local FakeGraphStore/FakeVectorStore, so writes from one worker
-    process are not visible to the API process. Swap for Neo4jGraphStore /
-    a real vector store before relying on this path — tracked as a Phase 1
-    hardening item.
+    process-local FakeGraphStore/FakeVectorStore/FakeKeywordStore, so writes
+    from one worker process are not visible to the API process. Swap for
+    Neo4jGraphStore / a real vector + keyword index before relying on this
+    path — tracked as a Phase 1/2 hardening item.
     """
     asyncio.run(_run(document_id, filename, data))
 
@@ -38,6 +39,7 @@ async def _run(document_id: str, filename: str, data: bytes) -> None:
             llm=llm,
             graph_store=FakeGraphStore(),
             vector_store=FakeVectorStore(),
+            keyword_store=FakeKeywordStore(),
             object_store=LocalDiskObjectStore(settings.object_store_dir),
             document_repo=document_repo,
         )

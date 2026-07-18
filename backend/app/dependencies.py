@@ -4,20 +4,24 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
+from app.copilot.service import CopilotService
 from app.llm.base import LLMClient
 from app.llm.fake import FakeLLMClient
+from app.retrieval.hybrid import HybridRetriever
 from app.stores.document_repo import DocumentRepository, get_session
 from app.stores.graph_store import FakeGraphStore, GraphStore
+from app.stores.keyword_store import FakeKeywordStore, KeywordStore
 from app.stores.object_store import FakeObjectStore, LocalDiskObjectStore, ObjectStore
 from app.stores.vector_store import FakeVectorStore, VectorStore
 
 # In-memory stores are process-local singletons so writes made by one request
-# (e.g. an upload) are visible to a later request (e.g. a graph search) within
-# the same running server — that's what makes the demo coherent. Tests bypass
-# these entirely via FastAPI's dependency_overrides (see tests/conftest.py),
-# so each test gets a fresh, isolated store.
+# (e.g. an upload) are visible to a later request (e.g. a graph search or a
+# Copilot query) within the same running server — that's what makes the demo
+# coherent. Tests bypass these entirely via FastAPI's dependency_overrides
+# (see tests/conftest.py), so each test gets a fresh, isolated store.
 _shared_graph_store = FakeGraphStore()
 _shared_vector_store = FakeVectorStore()
+_shared_keyword_store = FakeKeywordStore()
 _shared_object_store: ObjectStore | None = None
 _shared_llm: LLMClient | None = None
 
@@ -49,6 +53,12 @@ def get_vector_store(settings: Settings = Depends(get_settings)) -> VectorStore:
     return _shared_vector_store
 
 
+def get_keyword_store(settings: Settings = Depends(get_settings)) -> KeywordStore:
+    # NOTE: always the in-memory FakeKeywordStore for now — a real
+    # OpenSearch/BM25 backend is a Phase 2 hardening item, not yet built.
+    return _shared_keyword_store
+
+
 def get_object_store(settings: Settings = Depends(get_settings)) -> ObjectStore:
     global _shared_object_store
     if _shared_object_store is None:
@@ -60,3 +70,19 @@ def get_object_store(settings: Settings = Depends(get_settings)) -> ObjectStore:
 
 async def get_document_repo(session: AsyncSession = Depends(get_session)) -> DocumentRepository:
     return DocumentRepository(session)
+
+
+def get_hybrid_retriever(
+    llm: LLMClient = Depends(get_llm_client),
+    vector_store: VectorStore = Depends(get_vector_store),
+    keyword_store: KeywordStore = Depends(get_keyword_store),
+    graph_store: GraphStore = Depends(get_graph_store),
+) -> HybridRetriever:
+    return HybridRetriever(llm, vector_store, keyword_store, graph_store)
+
+
+def get_copilot_service(
+    llm: LLMClient = Depends(get_llm_client),
+    retriever: HybridRetriever = Depends(get_hybrid_retriever),
+) -> CopilotService:
+    return CopilotService(llm, retriever)
