@@ -40,6 +40,17 @@ export interface CopilotAnswer {
   citations: CopilotCitation[];
 }
 
+export interface RCAEvidence {
+  tool: string;
+  arguments: Record<string, unknown>;
+  result_summary: string;
+}
+
+export interface RCAResult {
+  root_cause_chain: string;
+  evidence: RCAEvidence[];
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
@@ -71,5 +82,13 @@ export async function askCopilot(question: string): Promise<CopilotAnswer> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
+  });
+}
+
+export async function investigateRCA(description: string): Promise<RCAResult> {
+  return request<RCAResult>("/rca/investigate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ description }),
   });
 }

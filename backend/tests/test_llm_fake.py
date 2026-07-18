@@ -37,3 +37,49 @@ def test_fake_llm_chat_stream_returns_registered_response():
     llm.register_chat("weather", "It's sunny.")
     chunks = list(llm.chat_stream([Message(role="user", content="what's the weather?")]))
     assert "".join(chunks) == "It's sunny."
+
+
+def test_fake_llm_chat_returns_registered_text_response():
+    from app.llm.base import Message
+
+    llm = FakeLLMClient()
+    llm.register_chat("weather", "It's sunny.")
+    response = llm.chat([Message(role="user", content="what's the weather?")])
+    assert response.content == "It's sunny."
+    assert response.tool_calls == []
+
+
+def test_fake_llm_chat_sequence_advances_per_call():
+    from app.llm.base import ChatResponse, Message, ToolCall
+
+    llm = FakeLLMClient()
+    llm.register_chat_sequence(
+        "investigate P-101",
+        [
+            ChatResponse(content="", tool_calls=[ToolCall(id="1", name="lookup", arguments={"tag": "P-101"})]),
+            ChatResponse(content="Root cause: bearing wear.", tool_calls=[]),
+        ],
+    )
+
+    first = llm.chat([Message(role="user", content="investigate P-101 failure")])
+    assert first.tool_calls[0].name == "lookup"
+
+    second = llm.chat(
+        [
+            Message(role="user", content="investigate P-101 failure"),
+            Message(role="tool", content="{}"),
+        ]
+    )
+    assert second.content == "Root cause: bearing wear."
+    assert second.tool_calls == []
+
+
+def test_fake_llm_chat_sequence_stays_on_last_response_once_exhausted():
+    from app.llm.base import ChatResponse, Message
+
+    llm = FakeLLMClient()
+    llm.register_chat_sequence("done scenario", [ChatResponse(content="final", tool_calls=[])])
+
+    first = llm.chat([Message(role="user", content="done scenario")])
+    second = llm.chat([Message(role="user", content="done scenario")])
+    assert first.content == second.content == "final"

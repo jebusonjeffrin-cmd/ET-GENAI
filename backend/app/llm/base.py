@@ -23,6 +23,23 @@ class Tool:
     handler: Callable | None = field(default=None, repr=False)
 
 
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class ChatResponse:
+    """Result of a single non-streaming turn. `tool_calls` is empty when the
+    model produced a final answer; non-empty when it wants tools executed
+    before it continues — the caller (app/rca/agent.py) drives that loop."""
+
+    content: str
+    tool_calls: list[ToolCall]
+
+
 class LLMClient(Protocol):
     """Every piece of code that needs the model goes through this interface.
     Nothing outside app/llm/fake.py and app/llm/ollama_client.py should import
@@ -34,7 +51,13 @@ class LLMClient(Protocol):
         ...
 
     def chat_stream(self, messages: list[Message], tools: list[Tool] | None = None) -> Iterator[str]:
-        """Stream assistant text for a conversation, optionally with tool use."""
+        """Stream assistant text for a conversation. Used by the Copilot
+        (Phase 2), which doesn't need a tool-use loop."""
+        ...
+
+    def chat(self, messages: list[Message], tools: list[Tool] | None = None) -> ChatResponse:
+        """Single non-streaming turn that can return tool calls instead of
+        final text. Used by the RCA agent (Phase 3) tool-use loop."""
         ...
 
     def embed(self, texts: list[str]) -> list[list[float]]:

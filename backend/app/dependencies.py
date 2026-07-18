@@ -7,6 +7,8 @@ from app.config import Settings, get_settings
 from app.copilot.service import CopilotService
 from app.llm.base import LLMClient
 from app.llm.fake import FakeLLMClient
+from app.rca.agent import RCAAgent
+from app.rca.tools import RCATools
 from app.retrieval.hybrid import HybridRetriever
 from app.stores.document_repo import DocumentRepository, get_session
 from app.stores.graph_store import FakeGraphStore, GraphStore
@@ -86,3 +88,17 @@ def get_copilot_service(
     retriever: HybridRetriever = Depends(get_hybrid_retriever),
 ) -> CopilotService:
     return CopilotService(llm, retriever)
+
+
+def get_rca_tools(
+    graph_store: GraphStore = Depends(get_graph_store),
+    retriever: HybridRetriever = Depends(get_hybrid_retriever),
+) -> RCATools:
+    return RCATools(graph_store, retriever)
+
+
+def get_rca_agent(
+    llm: LLMClient = Depends(get_llm_client),
+    tools: RCATools = Depends(get_rca_tools),
+) -> RCAAgent:
+    return RCAAgent(llm, tools)

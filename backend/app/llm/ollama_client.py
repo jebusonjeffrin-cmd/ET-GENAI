@@ -7,11 +7,20 @@ import httpx
 from pydantic import ValidationError
 
 from app.config import get_settings
-from app.llm.base import Message, T, Tool
+from app.llm.base import ChatResponse, Message, T, Tool, ToolCall
 
 
 class OllamaExtractionError(RuntimeError):
     """Raised when the model could not produce schema-valid JSON after retries."""
+
+
+def _tools_payload(tools: list[Tool] | None) -> list[dict] | None:
+    if not tools:
+        return None
+    return [
+        {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
+        for t in tools
+    ]
 
 
 class OllamaLLMClient:
@@ -75,14 +84,9 @@ class OllamaLLMClient:
             "messages": [{"role": m.role, "content": m.content} for m in messages],
             "stream": True,
         }
-        if tools:
-            payload["tools"] = [
-                {
-                    "type": "function",
-                    "function": {"name": t.name, "description": t.description, "parameters": t.parameters},
-                }
-                for t in tools
-            ]
+        tools_payload = _tools_payload(tools)
+        if tools_payload:
+            payload["tools"] = tools_payload
         with self._client.stream("POST", "/api/chat", json=payload) as response:
             response.raise_for_status()
             for line in response.iter_lines():
@@ -94,6 +98,28 @@ class OllamaLLMClient:
                     yield piece
                 if chunk.get("done"):
                     break
+
+    def chat(self, messages: list[Message], tools: list[Tool] | None = None) -> ChatResponse:
+        payload: dict = {
+            "model": self.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "stream": False,
+        }
+        tools_payload = _tools_payload(tools)
+        if tools_payload:
+            payload["tools"] = tools_payload
+        response = self._client.post("/api/chat", json=payload)
+        response.raise_for_status()
+        message = response.json()["message"]
+        tool_calls = [
+            ToolCall(
+                id=str(call.get("id", i)),
+                name=call["function"]["name"],
+                arguments=call["function"].get("arguments", {}),
+            )
+            for i, call in enumerate(message.get("tool_calls") or [])
+        ]
+        return ChatResponse(content=message.get("content", ""), tool_calls=tool_calls)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors = []

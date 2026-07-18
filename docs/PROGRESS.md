@@ -102,3 +102,52 @@ Running record of what's actually been built, phase by phase. Append a new entry
 ### Next phase
 
 **Phase 3 — Maintenance Intelligence & RCA Agent.** Per `PROJECT_PLAN.md` §7: custom tools (`search_equipment_history`, `get_work_orders`, `get_similar_incidents`) and a tool-use loop against the local model's native function-calling API that gathers evidence before drafting an RCA chain. Wire the already-built Equipment Health Dashboard, Work Order Explorer, RCA Workspace, and Maintenance Schedule view to it. Testing gate: unit tests per tool in isolation, integration test of the full tool-use loop, ≥3 seeded failure-scenario functional-acceptance run with human-reviewed evidence chains, regression check that Phases 1 and 2 still pass.
+
+---
+
+## Phase 3 — Maintenance Intelligence & RCA Agent — done (2026-07-18)
+
+### What was built
+
+**LLM interface extension** (`app/llm/base.py`, `app/llm/fake.py`, `app/llm/ollama_client.py`)
+- The Copilot's `chat_stream` (Phase 2) only streams text — it can't represent "the model wants a tool executed." Added a second method, `chat()`, that returns a `ChatResponse` (`content` + `tool_calls: list[ToolCall]`), i.e. a single non-streaming turn that can hand back either a final answer or a request to run tools. `OllamaLLMClient.chat()` parses Ollama's real `message.tool_calls` field; `FakeLLMClient.chat()` adds `register_chat_sequence(key, [ChatResponse, ...])` — scripts a multi-turn tool-calling conversation deterministically, advancing one response per call as the message history grows, so the whole agent loop is testable without a real model.
+
+**Backend** (`backend/`)
+- `RCATools` (`app/rca/tools.py`) — `search_equipment_history`, `get_work_orders`, `get_similar_incidents`. Deliberately **reuses** Phase 1's `GraphStore` and Phase 2's `HybridRetriever` rather than inventing a new WorkOrder/Incident data model — `get_work_orders` is just `search_equipment_history` filtered to `document_type == "work_order"`, and `get_similar_incidents` is the Copilot's own retriever. Less new code, less new risk, and it keeps the "one knowledge graph, one retrieval layer" story from `PROJECT_PLAN.md` §1 actually true.
+- `RCAAgent` (`app/rca/agent.py`) — the tool-use loop: call the model, execute any requested tools, feed results back as `role: "tool"` messages, repeat until the model returns a final answer with no tool calls (or `max_iterations` is hit, at which point it's forced to conclude with whatever evidence it's gathered so far). Every tool call is recorded as an `EvidenceRef` (tool name, arguments, result) and returned alongside the root-cause chain — this is what makes the RCA output evidence-linked rather than a bare LLM opinion.
+- `POST /rca/investigate` (`app/api/routes/rca.py`) — synchronous, returns `{root_cause_chain, evidence[]}`.
+- Ingestion pipeline, dependencies, and stores are all unchanged — Phase 3 is new orchestration on top of existing infrastructure, not new plumbing.
+- `backend/scripts/phase_gate/phase_3.py` — seeds 3 synthetic failure scenarios (compressor bearing failure, pump seal leak, valve actuator failure), each with supporting work-order/inspection documents, then runs the real agent against each and prints the evidence-linked chain plus a human-review checklist. Not run yet (see gaps below).
+
+**Frontend** (`frontend/`)
+- Maintenance & RCA page: the RCA Workspace is now a real interactive form (incident description → `POST /rca/investigate` → root-cause chain + evidence list), replacing the static "C-305 seeded scenario" fixture. Equipment Health stays fixture — deliberately scoped out this pass; a real risk score needs a trained failure-prediction model, which `PROJECT_PLAN.md` §7 already flagged as out of scope for a hackathon corpus, not an oversight.
+
+### Verification actually run
+
+| Check | Result |
+|---|---|
+| Backend tests (`pytest`) | **49/49 passed** (17 Phase 1 + 17 Phase 2 + 15 new Phase 3 — zero regressions) |
+| Backend lint (`ruff check .`) | **clean** (includes `scripts/phase_gate/phase_3.py`) |
+| Backend types (`mypy app`) | **clean** |
+| Backend coverage | **78%** — `app/rca/agent.py` and `app/rca/tools.py` both at **100%** |
+| Frontend tests (`vitest run`) | **15/15 passed** (was 11 — added a full `Maintenance.test.tsx`, the first for that page) |
+| Frontend types (`tsc --noEmit`) | **clean** |
+| Frontend production build (`vite build`) | **succeeds** |
+
+### Key decisions made this phase
+
+- **`chat()` is separate from `chat_stream()`, not a replacement.** Copilot keeps streaming (better UX for a chat answer); RCA needs discrete turns it can inspect for tool calls before deciding what happens next. Two methods, one interface, both real code paths — not a shortcut taken to avoid touching Phase 2.
+- **No new data model for work orders/incidents.** Tempting to add explicit `WorkOrder`/`Incident` entities per the ontology in `PROJECT_PLAN.md` §4, but everything needed already exists as `Document` nodes with a `document_type` property (set during Phase 1 extraction) — filtering on that property is simpler and just as correct at this corpus size. Revisit only if `document_type` filtering proves too coarse.
+- **`FakeLLMClient.chat()` checks single-shot `register_chat` registrations against only the *last* message, before checking multi-turn `register_chat_sequence` registrations against the *full* history.** This lets a test override an in-progress scripted sequence with a targeted response (e.g. the agent's forced-conclusion prompt) without the ambiguity of two registries both matching the same call. Documented inline in `fake.py` — not an obvious ordering, worth remembering if this file gets touched again.
+- **Evidence is recorded as `(tool, arguments, result_summary)` on every call, not just the final answer.** This is what makes an RCA response auditable — a reviewer (human or the Phase 3 gate script) can check each claim against the specific tool call that produced it, not just trust the model's prose.
+
+### Known gaps / honest limitations carried forward
+
+- Everything listed under Phase 0+1 and Phase 2 above still applies (`PgVectorStore`, OCR/vision, Celery worker state-sharing, `/copilot/stream` untested).
+- **Phase 3's real functional-acceptance run has not happened.** `scripts/phase_gate/phase_3.py` is written and ready but needs `LLM_BACKEND=ollama` against real inference — this dev machine still doesn't have Ollama. All 49 passing tests verify the *logic* is correct against scripted responses; they do not verify that a real 4B model reliably chooses to call tools before answering, or that its root-cause reasoning is actually good. That's exactly what the gate script and its human-review checklist exist to check, on the Ollama laptop.
+- Equipment Health Dashboard, Work Order Explorer (as its own screen), and Maintenance Schedule view remain fixture-only — only the RCA Workspace was wired this pass. `get_work_orders` exists and is tested, so wiring a real Work Order Explorer later is a frontend-only task, not a backend one.
+- `RCAAgent.investigate()` calls `llm.chat()` synchronously inside an async FastAPI route (same pattern as `CopilotService.answer()` in Phase 2) — fine for the fake/demo path, but a real multi-tool-call Ollama investigation will block the event loop for several seconds per request. Acceptable for a single-user hackathon demo; would need to move to a thread pool or async client before any concurrent-user use.
+
+### Next phase
+
+All three core modules from `PROJECT_PLAN.md` §1 (Ingestion & Knowledge Graph, Expert Knowledge Copilot, Maintenance Intelligence & RCA Agent) now have working, tested backends wired to real frontend UI. Per §1, Compliance and Lessons Learned are cut and not planned. Remaining work is **Phase 4 — Demo readiness** per `PROJECT_PLAN.md` §7: seed one coherent plant's worth of demo data across all three modules (not the scattered per-phase fixtures used for testing), a performance pass, PWA offline-mode check, and running the three outstanding phase-gate scripts (`phase_1.py`, `phase_2.py`, `phase_3.py`) against real Ollama on the deployment laptop before this can honestly be called fully gated rather than unit-tested.
